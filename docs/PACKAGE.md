@@ -44,13 +44,13 @@ Load the web service and the provider; the API key resolves through the `KEENABL
 |---|---|---|
 | `apiKey` | (unset) | Keenable API key; a non-empty literal wins over the credential reference. When no key resolves, the keyless public endpoints are used, which then require `appTitle` |
 | `apiKeyEnv` | `KEENABLE_API_KEY` | Name of the credential reference the API key resolves through when `apiKey` is unset — the credentials service first, then the launch environment |
-| `baseURL` | `https://api.keenable.ai` | Endpoint base; `/v1/search` or `/v1/fetch` (keyed) and their `/public` twins (keyless) are appended. An unparseable value makes both providers unavailable |
+| `baseURL` | `https://api.keenable.ai` | Endpoint base; `/v1/search` or `/v1/fetch` (keyed) and their `/public` twins (keyless) are appended. Must be an HTTPS URL with no credentials, query, or fragment; anything else makes both providers unavailable |
 | `mode` | `pro` | Search retrieval mode sent as Keenable's `mode`: `pro` (deeper retrieval) or `realtime` (fastest) |
-| `appTitle` | `$KEENABLE_APP_TITLE`, else `deepseek-harness` | Application name sent as the `X-Keenable-Title` header on keyless calls; Keenable rejects the public endpoints without it |
+| `appTitle` | `$KEENABLE_APP_TITLE`, else `deepseek-harness` | Application name sent as the `X-Keenable-Title` header on every request — the keyless endpoints reject a request without it, and it attributes traffic on the keyed ones |
 | `site` | (unset) | Restrict search results to one site, sent as Keenable's `site` (e.g. `techcrunch.com`) |
-| `maxResults` | (unset) | Default search result count when a request carries no `maxResults`; Keenable accepts 1–50, and a larger value is clamped to 50 |
-| `snippetMaxLength` | (unset) | Maximum search snippet length in characters, sent as Keenable's `snippet_max_length`; must be between 180 and 10000 |
-| `maxChars` | `50000` | Maximum fetched content length in characters, sent as Keenable's `max_chars`; longer content is truncated |
+| `maxResults` | (unset) | Default search result count when a request carries no `maxResults`; Keenable accepts 1–50, and a larger value is clamped into that range |
+| `snippetMaxLength` | (unset) | Maximum search snippet length in characters, sent as Keenable's `snippet_max_length`; must be between 180 and 10000. Keenable treats it as a hint, so the provider enforces the same budget on the way back |
+| `maxChars` | `50000` | Maximum fetched content length in characters, sent as Keenable's `max_chars` plus one so a longer page is detected; longer content is cut and marked truncated |
 | `live` | `true` | Fetch the page live from the source (`live=true`) instead of Keenable's indexed copy. The default matches the local HTTP fetcher this provider replaces; the indexed copy fails for URLs Keenable has not indexed |
 
 ### Live configuration
@@ -59,19 +59,19 @@ Every field above is volatile: a change committed to the profile config takes ef
 
 ### Configure in the Plugins page
 
-Since 1.0.5 the bundle's row on the Plugins page carries a configure control — the row title opens the row's page. There the API key is managed through the credentials service (it is never written into the settings file), and every field in the table above except `apiKeyEnv` is editable: the everyday fields stay open, the less-used ones (`appTitle`, `site`, `snippetMaxLength`, `maxChars`) sit under a collapsed "Advanced settings" group, and each field shows its default in the hint, its override state, and a reset action. Saving writes the values into the profile config, and because every field is volatile the next call uses them without a restart. The control appears only while the plugin is loaded; `apiKeyEnv` remains a config-file field.
+The bundle's row on the Plugins page carries a configure control — the row title opens the row's page. The page shows the **API key** alone; every field in the table above except `apiKeyEnv`, together with the live-fetch switch, sits in a collapsed "Advanced settings" group until it is expanded. The API key is managed through the credentials service (it is never written into the settings file), and each field shows its default in the hint, its override state, and a reset action. Saving writes the values into the profile config, and because every field is volatile the next call uses them without a restart. The control appears only while the plugin is loaded; `apiKeyEnv` remains a config-file field.
 
 ### What a search returns
 
-Each Keenable result maps to a `WebSearchSource`: `url`, `title`, the first non-blank of `snippet` then `description` as `snippet`, and `published_at` as `publishedAt`; a result with neither field has no portable snippet and is dropped. A request's `maxResults` wins over the configured `maxResults` default and is sent to Keenable as a cost and latency optimization — the final bound is enforced by the service, which truncates and flags. Keenable returns no generated answer, so the result carries no `content`.
+Each Keenable result maps to a `WebSearchSource`: `url`, `title`, the first non-blank of `snippet` then `description` as `snippet`, and `published_at` as `publishedAt`; a result with neither field has no portable snippet and is dropped. The excerpt is collapsed to one line and cut to `snippetMaxLength`, with an ellipsis marking the cut, because Keenable treats the budget as a hint and may exceed it. Result URLs are normalized, and two spellings of the same URL count as one source. A request's `maxResults` wins over the configured `maxResults` default and is clamped into Keenable's accepted range — the final bound is enforced by the service, which truncates and flags. Keenable returns no generated answer, so the result carries no `content`.
 
 ### What a fetch returns
 
-Each Keenable fetch maps to a `WebFetchResult`: the page as markdown under `body.kind: 'text'`, the envelope's `url` (falling back to the request URL), and `statusCode: 200`. Keenable's `max_chars` is a soft cap — it may return somewhat more than asked — so the provider slices `content` to `maxChars` itself and sets `truncated` only when it actually cut. The envelope carries no target-page status code, so an unreachable or unextractable page surfaces as a Keenable API error (`WEB_PROVIDER_ERROR`) rather than a non-200 result. Only http(s) request URLs reach the API; anything else fails locally as `WEB_INVALID_URL`.
+Each Keenable fetch maps to a `WebFetchResult`: the page as markdown under `body.kind: 'text'`, the envelope's `url` (falling back to the request URL), and `statusCode: 200`. Keenable's `max_chars` is a soft cap — it may return somewhat more than asked — so the provider slices `content` to `maxChars` itself and sets `truncated` only when it actually cut. The page title Keenable returns separately is prepended as a heading when the text does not already open with it. A response without page text is a failure, not an empty success. The envelope carries no target-page status code, so an unreachable or unextractable page surfaces as a Keenable API error (`WEB_PROVIDER_ERROR`) rather than a non-200 result. A request URL past 2048 characters, of another scheme, or carrying embedded credentials fails locally as `WEB_INVALID_URL`.
 
 ### Failures and recovery
 
-Provider failures — HTTP errors, network failures, unparseable or wrong-shape bodies — surface as `WebError` `WEB_PROVIDER_ERROR` with the response's `error`/`message` detail when present; an aborted request surfaces as `WEB_ABORTED`. HTTP redirects are rejected before the `Location` target is contacted and surface as `WEB_PROVIDER_ERROR`. Callers route on the code; the model-facing tools surface failures to the model under their own error wrappers.
+Provider failures — HTTP errors, network failures, unparseable or wrong-shape bodies, and a credential that cannot be resolved — surface as `WebError` `WEB_PROVIDER_ERROR` with the response's `error`/`message` detail when present; a keyless rate limit names the way out. An aborted request surfaces as `WEB_ABORTED`, including a cancellation carrying a custom reason. HTTP redirects are rejected before the `Location` target is contacted and surface as `WEB_PROVIDER_ERROR`. Callers route on the code; the model-facing tools surface failures to the model under their own error wrappers.
 
 -----
 
@@ -99,7 +99,7 @@ The package is a thin adapter over Keenable's API with three deliberate rules:
 
 ### Request and mapping flow
 
-`search()` posts the query, retrieval mode, and optional result count, snippet length, and site filter to the keyed or keyless operation with `redirect: 'error'`, so a redirect fails the request without contacting the target. `fetch()` GETs the keyed or keyless operation with the URL, `max_chars`, and `live` as query parameters. Both parsed envelopes are mapped field by field, and both classify an abort — a `DOMException` named `AbortError` — as `WEB_ABORTED`; anything else becomes `WEB_PROVIDER_ERROR`.
+`search()` posts the query, retrieval mode, and optional result count, snippet length, and site filter to the keyed or keyless operation with `redirect: 'error'`, so a redirect fails the request without contacting the target. `fetch()` GETs the keyed or keyless operation with the URL, `max_chars` plus one, and `live` as query parameters. Both parsed envelopes are mapped field by field, and both classify a cancellation — an aborted signal, or an error shaped like `AbortError` — as `WEB_ABORTED`; anything else becomes `WEB_PROVIDER_ERROR`.
 
 </details>
 
@@ -125,4 +125,3 @@ These limits define when the provider is a poor fit. They are current package co
 - **Fetch truncation is provider-enforced** — `content` is sliced to `maxChars` because Keenable's `max_chars` is a soft cap; `truncated` is exact, not inferred.
 - **Only `mode`/`site`/`maxResults`/`snippetMaxLength`/`maxChars`/`live` are exposed** — Keenable's date filters (`published_after`, `acquired_before`, …), point-in-time `query_time`, and the fetch `prompt` extraction instruction wait on provider-neutral service fields in the web seam.
 - **The keyless public endpoints are a shared pool** — without an API key, calls are rate limited per IP (1,000 requests/hour, 10 requests/second) and carry no usage metadata; store `KEENABLE_API_KEY` for production volume.
-- **Abort classification is error-shape-based** — only a `DOMException` named `AbortError` maps to `WEB_ABORTED`; an abort carrying a custom reason (such as `dsh-timeout`'s `TimeoutReason`) surfaces as `WEB_PROVIDER_ERROR`.

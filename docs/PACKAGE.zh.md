@@ -44,13 +44,13 @@ kind: "package-reference"
 |---|---|---|
 | `apiKey` | （不设置） | Keenable API 密钥；非空字面量优先于凭据引用。无任何密钥时使用免密钥公共端点，此时需要 `appTitle` |
 | `apiKeyEnv` | `KEENABLE_API_KEY` | `apiKey` 未设置时解析密钥所用的凭据引用名——凭据服务优先，其次启动环境 |
-| `baseURL` | `https://api.keenable.ai` | 端点基址；追加 `/v1/search` 或 `/v1/fetch`（带密钥）及其 `/public` 孪生端点（无密钥）。无法解析的值使两个提供方都不可用 |
+| `baseURL` | `https://api.keenable.ai` | 端点基址；追加 `/v1/search` 或 `/v1/fetch`（带密钥）及其 `/public` 孪生端点（无密钥）。必须是 https、且不带凭据、query 或 fragment 的 URL；否则两个提供方都不可用 |
 | `mode` | `pro` | 搜索检索模式，作为 Keenable 的 `mode` 发送：`pro`（更深检索）或 `realtime`（最快） |
-| `appTitle` | `$KEENABLE_APP_TITLE`，否则 `deepseek-harness` | 免密钥调用时 `X-Keenable-Title` 头的应用名；公共端点缺少它会被拒绝 |
+| `appTitle` | `$KEENABLE_APP_TITLE`，否则 `deepseek-harness` | 每个请求的 `X-Keenable-Title` 头应用名——公共端点缺少它会拒绝请求，带密钥的端点用它做流量归因 |
 | `site` | （不设置） | 将搜索结果限制在单个站点，作为 Keenable 的 `site` 发送（如 `techcrunch.com`） |
-| `maxResults` | （不设置） | 请求未带 `maxResults` 时的默认搜索结果数；Keenable 接受 1–50，更大的值会被裁剪到 50 |
-| `snippetMaxLength` | （不设置） | 搜索摘要最大字符数，作为 Keenable 的 `snippet_max_length` 发送；必须在 180 到 10000 之间 |
-| `maxChars` | `50000` | 抓取内容最大字符数，作为 Keenable 的 `max_chars` 发送；更长内容会被截断 |
+| `maxResults` | （不设置） | 请求未带 `maxResults` 时的默认搜索结果数；Keenable 接受 1–50，更大的值会被裁剪进该范围 |
+| `snippetMaxLength` | （不设置） | 搜索摘要最大字符数，作为 Keenable 的 `snippet_max_length` 发送；必须在 180 到 10000 之间。Keenable 只把它当提示，因此提供方返回时再按同一预算执行一次 |
+| `maxChars` | `50000` | 抓取内容最大字符数，作为 Keenable 的 `max_chars` 加一发送（以便判定页面是否真的超长）；更长内容会被裁切并标记为截断 |
 | `live` | `true` | 从源站实时抓取页面（`live=true`），而非 Keenable 的索引副本。默认值与被替代的本地 HTTP 抓取器一致（始终读实时源）；索引副本对 Keenable 未收录的 URL 会直接失败 |
 
 ### 热更新配置
@@ -59,19 +59,19 @@ kind: "package-reference"
 
 ### 在插件管理页配置
 
-1.0.5 起，插件管理页中本 bundle 的行带有配置入口——点击行标题即进入行的配置页。在该页面中，API 密钥经凭据服务管理（不写入设置文件），上表中除 `apiKeyEnv` 外的字段均可编辑：常用字段直接展示，不常用的字段（`appTitle`、`site`、`snippetMaxLength`、`maxChars`）收在默认折叠的“高级设置”组内；每个字段在提示文字中标注默认值，并带覆盖状态与恢复默认操作。保存后值写入 profile 配置；由于所有字段都是易变的，下一次调用即使用新值，无需重启。配置入口仅在插件加载后出现；`apiKeyEnv` 仍为配置文件字段。
+插件管理页中本 bundle 的行带有配置入口——点击行标题即进入行的配置页。页面默认只展示 **API 密钥**一项；上表中除 `apiKeyEnv` 外的字段与实时抓取开关全部收在默认折叠的“高级设置”组内，需要时才展开。API 密钥经凭据服务管理（不写入设置文件）；每个字段在提示文字中标注默认值，并带覆盖状态与恢复默认操作。保存后值写入 profile 配置；由于所有字段都是易变的，下一次调用即使用新值，无需重启。配置入口仅在插件加载后出现；`apiKeyEnv` 仍为配置文件字段。
 
 ### 搜索返回什么
 
-每个 Keenable 搜索结果映射为一个 `WebSearchSource`：`url`、`title`、`snippet` 与 `description` 中第一个非空内容作为 `snippet`、`published_at` 作为 `publishedAt`；两者都没有便携摘要的结果会被丢弃。请求的 `maxResults` 优先于配置的 `maxResults` 默认值，并作为成本与延迟优化发送给 Keenable——最终上限由服务在返回时截断并标记。Keenable 不返回生成的回答，因此结果不带 `content`。
+每个 Keenable 搜索结果映射为一个 `WebSearchSource`：`url`、`title`、`snippet` 与 `description` 中第一个非空内容作为 `snippet`、`published_at` 作为 `publishedAt`；两者都没有便携摘要的结果会被丢弃。摘要会折叠为单行并裁到 `snippetMaxLength`，裁切处加省略号标记——Keenable 只把该预算当提示，可能略微超出。结果 URL 经规范化，同一 URL 的两种拼写算一个来源。请求的 `maxResults` 优先于配置的 `maxResults` 默认值，并被裁剪进 Keenable 接受的范围——最终上限由服务在返回时截断并标记。Keenable 不返回生成的回答，因此结果不带 `content`。
 
 ### 抓取返回什么
 
-每次 Keenable 抓取映射为一个 `WebFetchResult`：页面 markdown 放在 `body.kind: 'text'` 下，URL 取响应 envelope 的 `url`（缺失时回退为请求 URL），`statusCode` 为 `200`。Keenable 的 `max_chars` 是软上限（可能略多返回），因此由提供方自己把 `content` 裁到 `maxChars`，只有真正裁过才置 `truncated`。envelope 不携带目标页面的状态码，因此抓不到或提取失败的页面以 Keenable API 错误（`WEB_PROVIDER_ERROR`）呈现，而不是一个非 200 的结果。只有 http(s) 请求 URL 会发给 API，其余在本地即失败（`WEB_INVALID_URL`）。
+每次 Keenable 抓取映射为一个 `WebFetchResult`：页面 markdown 放在 `body.kind: 'text'` 下，URL 取响应 envelope 的 `url`（缺失时回退为请求 URL），`statusCode` 为 `200`。Keenable 的 `max_chars` 是软上限（可能略多返回），因此由提供方自己把 `content` 裁到 `maxChars`，只有真正裁过才置 `truncated`。Keenable 单独返回的页面标题，在正文未以它开头时前置为标题行。没有页面正文的响应是失败，而不是空成功。envelope 不携带目标页面的状态码，因此抓不到或提取失败的页面以 Keenable API 错误（`WEB_PROVIDER_ERROR`）呈现，而不是一个非 200 的结果。超过 2048 字符、scheme 不符或带内嵌凭据的请求 URL 在本地即失败（`WEB_INVALID_URL`）。
 
 ### 失败与恢复
 
-提供方故障——HTTP 错误、网络失败、无法解析或形状不符的响应体——以 `WebError` 的 `WEB_PROVIDER_ERROR` 暴露，并在响应携带 `error`/`message` 时带上细节；请求被中止时以 `WEB_ABORTED` 暴露。HTTP 重定向在接触 `Location` 目标之前即被拒绝，同样以 `WEB_PROVIDER_ERROR` 暴露。调用方按错误码路由；面向模型的工具会在自己的错误包装下向模型呈现故障。
+提供方故障——HTTP 错误、网络失败、无法解析或形状不符的响应体，以及凭据解析失败——以 `WebError` 的 `WEB_PROVIDER_ERROR` 暴露，并在响应携带 `error`/`message` 时带上细节；免密钥命中限流时会说明如何解除。请求被中止时以 `WEB_ABORTED` 暴露，带自定义 reason 的取消也归入此类。HTTP 重定向在接触 `Location` 目标之前即被拒绝，同样以 `WEB_PROVIDER_ERROR` 暴露。调用方按错误码路由；面向模型的工具会在自己的错误包装下向模型呈现故障。
 
 -----
 
@@ -99,7 +99,7 @@ kind: "package-reference"
 
 ### 请求与映射流程
 
-`search()` 以 `redirect: 'error'` 向带密钥或无密钥操作发送查询、检索模式以及可选的结果数、摘要长度与站点过滤，使重定向在不接触目标的情况下失败。`fetch()` 以查询参数形式向带密钥或无密钥操作 GET 发送 URL、`max_chars` 与 `live`。两个响应 envelope 都逐字段映射；中止——名为 `AbortError` 的 `DOMException`——映射为 `WEB_ABORTED`，其余一切变为 `WEB_PROVIDER_ERROR`。
+`search()` 以 `redirect: 'error'` 向带密钥或无密钥操作发送查询、检索模式以及可选的结果数、摘要长度与站点过滤，使重定向在不接触目标的情况下失败。`fetch()` 以查询参数形式向带密钥或无密钥操作 GET 发送 URL、`max_chars` 加一与 `live`。两个响应 envelope 都逐字段映射；取消——信号已中止，或形状类似 `AbortError` 的错误——映射为 `WEB_ABORTED`，其余一切变为 `WEB_PROVIDER_ERROR`。
 
 </details>
 
@@ -125,4 +125,3 @@ kind: "package-reference"
 - **抓取截断由提供方强制执行**——`content` 会被裁到 `maxChars`（Keenable 的 `max_chars` 只是软上限），`truncated` 是精确值而非推断值。
 - **仅暴露 `mode`/`site`/`maxResults`/`snippetMaxLength`/`maxChars`/`live`**——Keenable 的日期过滤（`published_after`、`acquired_before` 等）、时点检索 `query_time` 与抓取的 `prompt` 提取指令，需要 web seam 先提供提供方中立的服务字段。
 - **免密钥公共端点是共享池**——没有 API 密钥时调用按 IP 限流（每小时 1,000 次、每秒 10 次）且不带用量元数据；生产用量请存入 `KEENABLE_API_KEY`（凭据服务或启动环境）。
-- **中止分类基于错误形状**——只有名为 `AbortError` 的 `DOMException` 映射为 `WEB_ABORTED`；携带自定义原因的中止（如 `dsh-timeout` 的 `TimeoutReason`）会以 `WEB_PROVIDER_ERROR` 暴露。

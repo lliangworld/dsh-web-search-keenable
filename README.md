@@ -1,16 +1,18 @@
 # dsh-web-search-keenable
 
-一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）网页能力插件，以 `ctx.web` 提供方形式注册，结构和官方 `@deepseek-ai/dsh-web-search-exa` 一致，同时提供**搜索**和**抓取**两个能力。
-
-> a dsh web-capability plugin registering a search and a fetch provider into the `ctx.web` seam, mirroring the shipped `@deepseek-ai/dsh-web-search-exa`.
-
-> **版本要求**：需要 dsh ≥ 0.2.1-rc.2——配置热更新（改配置不重启）与插件管理页内的配置面板都依赖该版本的 loader 与客户端组件。
+一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）网页能力插件，以 `ctx.web` 提供方形式注册，结构和官方 `@deepseek-ai/dsh-web-search-deepseek` 一致，同时提供**搜索**和**抓取**两个能力。
 
 | 能力 | 后端 | 密钥 |
 |---|---|---|
 | `web_search` + `web_fetch` | Keenable `/v1/search`、`/v1/fetch` | 可无密钥（公共端点限流），有密钥更好：配置 `apiKey`、凭据服务或 `$KEENABLE_API_KEY` |
 
 姊妹插件（TinyFish 后端）在独立仓库 [dsh-web-search-tinyfish](https://github.com/lliangworld/dsh-web-search-tinyfish)。两个插件互相独立、版本各自管理，可以只装其中一个，也可以两个都装。
+
+## 版本要求
+
+需要 dsh ≥ 0.2.1-rc.2：配置热更新（改配置不重启）与插件管理页内的配置面板都依赖该线版本的 loader 与客户端组件。
+
+manifest 的 `engines.dsh` 如实声明了这个范围。低于该版本的旧 dsh 会在启动时跳过插件并给出提示（不会带着不兼容的配置运行）；等于或高于该版本的 dsh 直接可用，升级无需改插件。
 
 ## 安装
 
@@ -25,6 +27,8 @@ dsh plugin --profile desktop add github:lliangworld/dsh-web-search-keenable
 ```
 
 `github:用户名/仓库名` 也可以写成完整仓库地址 `https://github.com/lliangworld/dsh-web-search-keenable`。
+
+安装后重启 Harness 即可使用，无需其他设置。插件会把它那一行的**标题变成配置入口**出现在插件管理页。
 
 ## 升级
 
@@ -44,24 +48,40 @@ web 与 desktop 需要各自执行升级。更新后的代码在**下次启动 H
 
 ## 固定使用哪个提供方
 
-在 profile 的 `cordis.patch.yml` 中指定，搜索和抓取可以分别选择（混搭亦可）：
+本插件的 patch 已把搜索和抓取都钉到 `keenable`。两个 provider 同时注册且没有钉选时，seam 无法在它们之间取舍（会报 `WEB_PROVIDER_AMBIGUOUS`），所以由插件自己声明默认值。
+
+在 profile 的 `cordis.patch.yml` 里可以覆盖，搜索和抓取可分别选择（混搭亦可）：
 
 ```yaml
 - id: web
   config:
-    searchProvider: keenable   # 或 tinyfish
-    fetchProvider: keenable    # 或 tinyfish
+    searchProvider: keenable   # 或 tinyfish / deepseek-official / deepseek-search-api
+    fetchProvider: http       # 或 keenable / tinyfish / deepseek-search-api
 ```
 
-不指定的情况下，`ctx.web` 会自动选用各自能力下已注册且可用的提供方。
+> profile 的 config patch 会**整块替换**该行的 config 对象，所以想保留另一个字段必须一起重述。
 
-## 配置热更新
+## 配置
 
-插件的全部配置字段都是易变的（volatile）：在 profile 配置中修改任意字段——端点、检索模式、数量上限、过滤条件、密钥引用等——**下一次调用即生效**，无需重启 Harness（loader 会把新值提交进运行中的插件，而不是重启它）。API 密钥按操作解析：配置字面量 `apiKey` → 凭据服务（`KEENABLE_API_KEY` 引用）→ 启动环境变量，任一提供均可。各字段完整说明见 [docs/PACKAGE.md](docs/PACKAGE.md)（英文）与 [docs/PACKAGE.zh.md](docs/PACKAGE.zh.md)（中文）。
+插件的全部配置字段都是易变的（volatile）：在 profile 配置中修改任意字段——端点、检索模式、数量上限、过滤条件、密钥引用等——**下一次调用即生效**，无需重启 Harness（loader 会把新值提交进运行中的插件，而不是重启它）。
 
-## 在插件管理页配置（1.0.5 起）
+API 密钥按操作解析，任一提供均可：
 
-本插件带浏览器端设置卡：插件管理页中对应 bundle 的**行标题即配置入口**，点击进入行的配置页——API 密钥经凭据服务管理（不写入设置文件），除 `apiKeyEnv` 外的全部字段均可编辑（提示文字标注默认值、覆盖状态与恢复默认；不常用字段收在默认折叠的“高级设置”组内），保存后下一次调用即生效。配置入口仅在插件加载后出现。
+1. 配置字面量 `apiKey`（写在 profile 的 `cordis.patch.yml` 里，优先级最高）；
+2. 凭据服务中的 `KEENABLE_API_KEY` 引用（在插件管理页保存，不写入配置文件）；
+3. 启动环境变量 `KEENABLE_API_KEY`。
+
+有密钥时两个能力都走带鉴权端点；没有密钥时走免密钥公共端点（按 IP 限流：10 次/秒、1000 次/小时），并需要应用名用于 `X-Keenable-Title` 头（取 `appTitle` 配置，其次 `$KEENABLE_APP_TITLE`，最后内置常量）。
+
+各字段完整说明见 [docs/PACKAGE.md](docs/PACKAGE.md)（英文）与 [docs/PACKAGE.zh.md](docs/PACKAGE.zh.md)（中文）。
+
+## 在插件管理页配置
+
+本插件带浏览器端设置卡：插件管理页中对应 bundle 的**行标题即配置入口**，点击进入行的配置页。
+
+页面默认只显示 **API 密钥**一项——这是部署时通常唯一需要设置的项；其余配置字段（端点基址、检索模式、结果数、应用名、站点过滤、摘要长度、抓取字符上限）与**实时抓取**开关收在默认折叠的"高级设置"组内，需要时才展开。
+
+密钥经凭据服务管理（不写入设置文件），各字段的提示文字标注默认值、覆盖状态与恢复默认操作。保存后下一次调用即生效。配置入口仅在插件加载后出现；`apiKeyEnv`（密钥引用的名称）仍是配置文件字段。
 
 ## 目录结构
 
@@ -69,7 +89,7 @@ web 与 desktop 需要各自执行升级。更新后的代码在**下次启动 H
 .
 ├── index.js            # 插件入口：配置模式、凭据解析、提供方注册，两个提供方的完整实现（单文件、无需构建）
 ├── client.js           # 浏览器端设置卡（插件管理页配置入口，手写 __ModuleLoader__ factory，无构建步骤）
-├── cordis.patch.yml    # loader patch：向 web seam insert 本插件
+├── cordis.patch.yml    # loader patch：向 web seam insert 本插件，并钉两个 provider 为 keenable
 ├── icon.svg
 ├── locale/             # en.json / zh.json
 ├── docs/

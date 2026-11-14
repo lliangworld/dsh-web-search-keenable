@@ -167,7 +167,7 @@ window.__ModuleLoader__.load({
 				},
 				{
 					...(0, _deepseek_ai_dsh_client_ui_primitives.settingsNumberField)("maxChars"),
-					parse: boundedInt(1, Number.MAX_SAFE_INTEGER)
+					parse: boundedInt(1, 199999)
 				},
 				{
 					...(0, _deepseek_ai_dsh_client_ui_primitives.settingsTextField)("live"),
@@ -178,27 +178,29 @@ window.__ModuleLoader__.load({
 		/**
 		 * The value fields the card renders, in order: the config field, the
 		 * dictionary key of its invalid-value message, whether it is numeric,
-		 * and whether the advanced group holds it.
+		 * and whether the advanced group holds it. Every field sits in the
+		 * advanced group: the card shows the API key alone by default, because
+		 * that is the one setting a deployment usually has to make.
 		 */
 		const VALUE_FIELDS = [
-			{ name: "baseURL", invalid: "invalidText" },
-			{ name: "mode", invalid: "invalidText" },
-			{ name: "maxResults", invalid: "invalidCount", numeric: true },
+			{ name: "baseURL", invalid: "invalidText", advanced: true },
+			{ name: "mode", invalid: "invalidText", advanced: true },
+			{ name: "maxResults", invalid: "invalidCount", numeric: true, advanced: true },
 			{ name: "appTitle", invalid: "invalidText", advanced: true },
 			{ name: "site", invalid: "invalidText", advanced: true },
 			{ name: "snippetMaxLength", invalid: "invalidSnippet", numeric: true, advanced: true },
 			{ name: "maxChars", invalid: "invalidChars", numeric: true, advanced: true }
 		];
 		/**
-		 * Host-side fallbacks for fields whose schema carries no default: the
-		 * value the provider uses when the config names none. They live beside
-		 * the card because the settings schema alone cannot show them; keep
-		 * them in step with the provider's own constants.
+		 * Host-side fallback for the one field whose schema carries no default:
+		 * the value the provider uses when the config names none. It lives
+		 * beside the card because the settings schema alone cannot show it —
+		 * `appTitle` has an environment fallback behind its constant, so a
+		 * schema default would hide that. Keep it in step with the provider's
+		 * own constant.
 		 */
 		const FALLBACK_DEFAULTS = {
-			baseURL: "https://api.keenable.ai",
-			appTitle: "deepseek-harness",
-			mode: "pro"
+			appTitle: "deepseek-harness"
 		};
 		//#endregion
 		//#region lib/types/client/styles.js
@@ -262,6 +264,30 @@ window.__ModuleLoader__.load({
 			const state = props.useKeenableCard((snapshot) => snapshot);
 			if (props.view === "summary") return t("description");
 			const disabled = !state.writable || state.saving;
+			/**
+			 * The advanced group: every config field, in the order VALUE_FIELDS
+			 * lists them, with the live-fetch switch last. The switch sits
+			 * beside the fields it belongs with rather than above them, so the
+			 * group reads as one list.
+			 */
+			const advancedGroup = () => [
+				...VALUE_FIELDS.map((field) => valueField(props, t, state, field, disabled)),
+				(0, react_jsx_runtime.jsxs)("div", {
+					className: "dshKeenableToggleRow",
+					children: [(0, react_jsx_runtime.jsx)("span", { children: t("live") }), (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Switch, {
+						checked: state.live,
+						label: t("live"),
+						disabled,
+						onChange: (checked) => {
+							props.setLive(checked);
+						}
+					})]
+				}),
+				(0, react_jsx_runtime.jsx)("p", {
+					className: "dshKeenableHint",
+					children: t("liveHint")
+				})
+			];
 			return (0, react_jsx_runtime.jsxs)(_deepseek_ai_dsh_client_ui_primitives.SettingsForm, {
 				labels: formLabels(t),
 				state,
@@ -280,22 +306,6 @@ window.__ModuleLoader__.load({
 							props.edit("apiKey", text);
 						}
 					}),
-					...VALUE_FIELDS.filter((field) => field.advanced !== true).map((field) => valueField(props, t, state, field, disabled)),
-					(0, react_jsx_runtime.jsxs)("div", {
-						className: "dshKeenableToggleRow",
-						children: [(0, react_jsx_runtime.jsx)("span", { children: t("live") }), (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Switch, {
-							checked: state.live,
-							label: t("live"),
-							disabled,
-							onChange: (checked) => {
-								props.setLive(checked);
-							}
-						})]
-					}),
-					(0, react_jsx_runtime.jsx)("p", {
-						className: "dshKeenableHint",
-						children: t("liveHint")
-					}),
 					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
 						variant: "outline",
 						size: "sm",
@@ -309,7 +319,7 @@ window.__ModuleLoader__.load({
 							className: `dshKeenableChevron${state.advancedOpen ? " dshKeenableChevronOpen" : ""}`
 						})]
 					}),
-					...state.advancedOpen === true ? VALUE_FIELDS.filter((field) => field.advanced === true).map((field) => valueField(props, t, state, field, disabled)) : []
+					...state.advancedOpen === true ? advancedGroup() : []
 				]
 			});
 		}
@@ -520,6 +530,12 @@ window.__ModuleLoader__.load({
 		 * page's `plugins.row.config` slot while the Host serves the namespace,
 		 * so a deployment without the provider shows no trace of it, and a
 		 * saved field reaches the next call without a restart.
+		 *
+		 * The card shows the API key alone and folds every config field,
+		 * together with the live-fetch switch, into a collapsed advanced group:
+		 * the key is the one setting a deployment usually has to make, and the
+		 * rest are tuning knobs that only matter once the default fit is known
+		 * to be wrong.
 		 */
 		/** Required services (cordis fiber inject). */
 		const inject = [
@@ -560,6 +576,7 @@ window.__ModuleLoader__.load({
 				name: "plugins.row.config",
 				key: ROW_CONFIG_KEY,
 				locale: NS,
+				order: 50,
 				inject: () => card.inject()
 			}, KeenableCard)));
 		}

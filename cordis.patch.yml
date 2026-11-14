@@ -1,6 +1,18 @@
-# Inserts the Keenable search provider. It registers with the `ctx.web` seam
-# exactly like `web-search-exa` does, so the web service resolves it when it is
-# the only usable search backend — or pin it with `searchProvider: keenable`.
+# The layer this bundle contributes when a profile lists it.
+#
+# The plugin registers under the id `keenable`, once per capability registry.
+# The built-in DeepSeek search provider and the local HTTP fetch provider stay
+# mounted, so both ids are pinned: with two usable providers and no pin, the seam
+# fails with WEB_PROVIDER_AMBIGUOUS instead of picking one. A config patch
+# replaces the row's config object, so both fields are stated.
+#
+# To keep the local HTTP fetch provider, set fetchProvider back to `http`.
+- id: web
+  name: '@deepseek-ai/dsh-web'
+  config:
+    searchProvider: keenable
+    fetchProvider: keenable
+
 - insert:
     - id: web-search-keenable
       name: '@lliangworld/dsh-web-search-keenable'
