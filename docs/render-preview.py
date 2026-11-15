@@ -37,7 +37,7 @@ import re
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 #: Rendered at this multiple of the canvas, then downsampled.
 SUPERSAMPLE = 4
@@ -151,25 +151,37 @@ class Canvas:
             size -= 0.5
         return size
 
-    def accent(self, x, y, w, h, fill, radius):
+    def accent(self, x, y, w, h, fill, radius, card_h):
         """A top accent bar clipped to the card's rounded corners.
 
         A square-cornered bar laid over a rounded card overhangs at both top
         corners, which reads as a misalignment rather than a design choice. The
-        clip is the card's own shape, so the bar follows it exactly.
+        clip is the card's own rounded shape, so the bar follows it exactly.
+
+        The clip must be narrowed to the bar's own rows as well: clipping to the
+        card's top *section* — the shape that ends `radius` below the bar — tints
+        every row down to the first full-width one, which turns a 5-unit bar
+        into a 17-unit tongue. The card's rounded shape supplies the corners; a
+        plain band supplies the height.
 
         @param x, y - the card's top-left, in canvas units.
         @param w, h - the card's width and the bar's height.
         @param fill - the bar's colour.
         @param radius - the card's corner radius, in canvas units.
+        @param card_h - the card's own height, so the clip follows its corners.
         """
-        # The clip is the card's top section: rounded at the top, square where
-        # the bar ends, so nothing below the bar is tinted.
+        # The card's rounded shape, then the bar's rows: their intersection is
+        # the bar with the card's corners and nothing else.
         mask = Image.new('L', self.image.size, 0)
         ImageDraw.Draw(mask).rounded_rectangle(
             (round(x * SUPERSAMPLE), round(y * SUPERSAMPLE),
-             round((x + w) * SUPERSAMPLE), round((y + h + radius) * SUPERSAMPLE)),
+             round((x + w) * SUPERSAMPLE), round((y + card_h) * SUPERSAMPLE)),
             radius=round(radius * SUPERSAMPLE), fill=255)
+        band = Image.new('L', self.image.size, 0)
+        ImageDraw.Draw(band).rectangle(
+            (round(x * SUPERSAMPLE), round(y * SUPERSAMPLE),
+             round((x + w) * SUPERSAMPLE), round((y + h) * SUPERSAMPLE)), fill=255)
+        mask = ImageChops.multiply(mask, band)
         self.image.paste(Image.new('RGB', self.image.size, fill), (0, 0), mask)
 
     def downsample(self) -> Image.Image:
@@ -198,7 +210,7 @@ def draw_scene(scene: dict, lang: str) -> Image.Image:
     canvas.rect(search['x'], search['y'], search['w'], search['h'], fill=colors['card'],
                 radius=search['r'], outline=colors['cardEdge'])
     canvas.accent(search['x'], search['y'], search['w'], search['bar']['h'],
-                  search['bar']['fill'], search['r'])
+                  search['bar']['fill'], search['r'], search['h'])
 
     canvas.text(search['titleX'], search['titleY'], text['searchTitle'], strong, 13, colors['text'])
 
@@ -230,7 +242,7 @@ def draw_scene(scene: dict, lang: str) -> Image.Image:
     canvas.rect(fetch['x'], fetch['y'], fetch['w'], fetch['h'], fill=colors['card'],
                 radius=fetch['r'], outline=colors['cardEdge'])
     canvas.accent(fetch['x'], fetch['y'], fetch['w'], fetch['bar']['h'],
-                  fetch['bar']['fill'], fetch['r'])
+                  fetch['bar']['fill'], fetch['r'], fetch['h'])
 
     canvas.text(fetch['titleX'], fetch['titleY'], text['fetchTitle'], strong, 13, colors['text'])
 
